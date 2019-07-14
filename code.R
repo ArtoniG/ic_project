@@ -32,7 +32,25 @@ h5createFile("myhdf5file.h5")
 h5createGroup("myhdf5file.h5", "analysis")
 h5createDataset(file = "myhdf5file.h5", dataset = "analysis/dataset", dims = dim, maxdims = dim, storage.mode = "double", chunk = dim, level = 5, showWarnings = FALSE)
 
+## cria objeto da classe arrayRealizationSink para processamento em bloco,
+## assim como o "bloco" que será utilizado
+real.sink <- RealizationSink(dim = dim, dimnames = NULL, type = "double")
+block <- colGrid(real.sink, ncol = 100)
+
+## determina um limite para a quantidade de dados que seram processadas,
+## bem como será o tipo de leitura dos dados (HDF5)
+makeCappedVolumeBox(maxvol = 50000000, maxdim = c(500000,100), shape = "first-dim-grows-first")
+setRealizationBackend("HDF5Array")
+
 ## armazena os dados no arquivo criado acima já com o background corrigido pelo método rma
+
+#importação por blocos de 100 colunas
+num.blocks <- length(files.name) %/% 100
+length.last.block <-length(files.name) %% 100
+aux <- read.celfiles(files.name[1])
+
+
+#importação por amostra com background corrigido
 for (i in seq_along(files.name)) {
   aux <- read.celfile(files.name[i], intensity.means.only = TRUE)[["INTENSITY"]][["MEAN"]] ## armazena uma amostra
   newaux <- aux[pminfo$fid] ## seleciona apenas PM
@@ -46,10 +64,7 @@ for (i in seq_along(files.name)) {
 ## seleciona outro espaço de memória para armazenar os dados dos índices 
 h5createDataset(file = "myhdf5file.h5", dataset = "analysis/index0", dims = c(length(pminfo$fid), length(files.name)), maxdims = dim, storage.mode = "double", chunk = dim, level = 5, showWarnings = FALSE)
 
-## determina um limite para a quantidade de dados que seram processadas,
-## bem como será o tipo de leitura dos dados (HDF5)
-makeCappedVolumeBox(maxvol = 50000000, maxdim = c(500000,100), shape = "first-dim-grows-first")
-setRealizationBackend("HDF5Array")
+
 h5closeAll()
 h5f <- H5Fopen("myhdf5file.h5")
 h5g <- H5Gopen(h5f, "analysis")
