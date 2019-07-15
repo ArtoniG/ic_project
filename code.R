@@ -6,6 +6,9 @@ library(limma)
 library(R.utils)
 library(dplyr)
 
+
+###### FUNÇÃO QUE IMPORTA OS DADOS COMO HDF5
+
 ## cria um objeto que armazena os nomes dos dados que serão carregados
 setwd("~/Documents/GSE25507")
 files.name <- as.character(list.files(all.files = TRUE, pattern = "[gz]", recursive = FALSE, include.dirs = FALSE, full.names = FALSE, no.. = TRUE))
@@ -20,12 +23,12 @@ if (!same.kind)
 nrows <- prod(input.kind[[1]][["CEL dimensions"]])
 dim <- c(nrows, length(files.name))
 
-#h5createDataset(file = "myhdf5file.h5", dataset = "analysis/dataset", dims = c(nrows, length(files.name)), storage.mode = "double", chunk = dim, level = 5, showWarnings = FALSE)
 pkganno <- "pd.hg.u133.plus.2"  # Why is not input.kind[[1]][["cdfName"]] ?
 library(pkganno, character.only = TRUE)
 conn <- db(get(pkganno))
 ## dbListTables(conn) retorna as tabelas possíveis de serem acessadas através da conexão gerada acima
 pminfo <- dbGetQuery(conn, "SELECT * FROM pmfeature")
+featinfo <- dbGetQuery(conn, 'SELECT * FROM feature')
 
 ## cria um arquivo HDF5 com um grupo e um espaço para armazenar os dados
 h5createFile("myhdf5file.h5")
@@ -44,11 +47,17 @@ setRealizationBackend("HDF5Array")
 
 ## armazena os dados no arquivo criado acima já com o background corrigido pelo método rma
 
-#importação por blocos de 100 colunas
-num.blocks <- length(files.name) %/% 100
-length.last.block <-length(files.name) %% 100
-aux <- read.celfiles(files.name[1])
+### ARMAZENAR A MATRIZ COM OS DADOS E PASSAR AS DEMAIS INFORMAÇÕES COMO ATRIBUTO PARA O ARQUIVO HDF5
 
+#importação por blocos de 100 colunas
+#num.blocks <- length(files.name) %/% 100
+#length.last.block <-length(files.name) %% 100
+#i <- 0
+#dim(files.name) <- c(1, length(files.name))
+#apply(files.name, 2, function(name.celfile){
+#  i <- i+1
+#  h5write(read.celfiles(name.celfile), "myhdf5file.h5", "analysis/fulldata", index = list(NULL,i))
+#}) 
 
 #importação por amostra com background corrigido
 for (i in seq_along(files.name)) {
@@ -62,14 +71,14 @@ for (i in seq_along(files.name)) {
 }
 
 ## seleciona outro espaço de memória para armazenar os dados dos índices 
-h5createDataset(file = "myhdf5file.h5", dataset = "analysis/index0", dims = c(length(pminfo$fid), length(files.name)), maxdims = dim, storage.mode = "double", chunk = dim, level = 5, showWarnings = FALSE)
+#h5createDataset(file = "myhdf5file.h5", dataset = "analysis/index0", dims = c(length(pminfo$fid), length(files.name)), maxdims = dim, storage.mode = "double", chunk = dim, level = 5, showWarnings = FALSE)
 
 
 h5closeAll()
 h5f <- H5Fopen("myhdf5file.h5")
 h5g <- H5Gopen(h5f, "analysis")
 h5d <- H5Dopen(h5g, "dataset")
-h5id <- H5Dopen(h5g, "index")
+#h5id <- H5Dopen(h5g, "index")
 
 ## localiza os dados de expressão na memória
 data <- realize(h5g$dataset)
