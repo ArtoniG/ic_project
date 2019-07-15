@@ -5,6 +5,7 @@ library(affyio)
 library(limma)
 library(R.utils)
 library(dplyr)
+library(sqldf)
 
 
 ###### FUNÇÃO QUE IMPORTA OS DADOS COMO HDF5
