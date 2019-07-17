@@ -29,7 +29,7 @@ library(pkganno, character.only = TRUE)
 conn <- db(get(pkganno))
 ## dbListTables(conn) retorna as tabelas possíveis de serem acessadas através da conexão gerada acima
 pminfo <- dbGetQuery(conn, "SELECT * FROM pmfeature")
-featinfo <- dbGetQuery(conn, 'SELECT * FROM feature')
+featinfo <- dbGetQuery(conn, 'SELECT * FROM featureSet')
 
 ## cria um arquivo HDF5 com um grupo e um espaço para armazenar os dados
 h5createFile("myhdf5file.h5")
