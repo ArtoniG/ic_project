@@ -10,11 +10,13 @@ library(sqldf)
 
 ###### FUNÇÃO QUE IMPORTA OS DADOS COMO HDF5
 
-## cria um objeto que armazena os nomes dos dados que serão carregados
+## Vai até o diretório no qual estão os arquivos .CEL
 setwd("~/Documents/GSE25507")
+
+## cria um objeto que armazena os nomes dos dados que serão carregados
 files.name <- as.character(list.files(all.files = TRUE, pattern = "[gz]", recursive = FALSE, include.dirs = FALSE, full.names = FALSE, no.. = TRUE))
 
-## testa se todos os CELs sao do mesmo tipo
+## testa se todos os CELs são do mesmo tipo
 input.kind <- lapply(files.name, read.celfile.header)
 same.kind <- length(unique(sapply(input.kind, "[[", "cdfName"))) == 1
 if (!same.kind)
@@ -29,12 +31,28 @@ library(pkganno, character.only = TRUE)
 conn <- db(get(pkganno))
 ## dbListTables(conn) retorna as tabelas possíveis de serem acessadas através da conexão gerada acima
 pminfo <- dbGetQuery(conn, "SELECT * FROM pmfeature")
+mminfo <- dbGetQuery(conn, "SELECT * FROM mmfeature")
 featinfo <- dbGetQuery(conn, 'SELECT * FROM featureSet')
+tableinfo <- dbGetQuery(conn, "SELECT * FROM table_info")
+
 
 ## cria um arquivo HDF5 com um grupo e um espaço para armazenar os dados
 h5createFile("myhdf5file.h5")
 h5createGroup("myhdf5file.h5", "analysis")
 h5createDataset(file = "myhdf5file.h5", dataset = "analysis/dataset", dims = dim, maxdims = dim, storage.mode = "double", chunk = dim, level = 5, showWarnings = FALSE)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ## cria objeto da classe arrayRealizationSink para processamento em bloco,
 ## assim como o "bloco" que será utilizado
@@ -48,7 +66,7 @@ setRealizationBackend("HDF5Array")
 
 ## armazena os dados no arquivo criado acima já com o background corrigido pelo método rma
 
-### ARMAZENAR A MATRIZ COM OS DADOS E PASSAR AS DEMAIS INFORMAÇÕES COMO ATRIBUTO PARA O ARQUIVO HDF5
+### ARMAZENAR A MATRIZ COM OS DADOS E DEMAIS INFORMAÇÕES PARA O ARQUIVO HDF5 EM ESPAÇOS DE MEMÓRIA SEPARADOS
 
 #importação por blocos de 100 colunas
 #num.blocks <- length(files.name) %/% 100
@@ -59,6 +77,13 @@ setRealizationBackend("HDF5Array")
 #  i <- i+1
 #  h5write(read.celfiles(name.celfile), "myhdf5file.h5", "analysis/fulldata", index = list(NULL,i))
 #}) 
+
+#importação por amostra sem background corrigido
+for (i in seq_along(files.name)) {
+  aux <- read.celfile(files.name[1], intensity.means.only = T)[["INTENSITY"]][["MEAN"]]
+  h5write(aux, "myhdf5file.h5", "analysis/index1", index = list(NULL,i))
+}
+
 
 #importação por amostra com background corrigido
 for (i in seq_along(files.name)) {
@@ -78,11 +103,11 @@ for (i in seq_along(files.name)) {
 h5closeAll()
 h5f <- H5Fopen("myhdf5file.h5")
 h5g <- H5Gopen(h5f, "analysis")
-h5d <- H5Dopen(h5g, "dataset")
-#h5id <- H5Dopen(h5g, "index")
+#h5d <- H5Dopen(h5g, "dataset")
+h5id <- H5Dopen(h5g, "index1")
 
 ## localiza os dados de expressão na memória
-data <- realize(h5g$dataset)
+data <- realize(h5g$index1)
 
 ## seleciona apenas PM
 pm <- matrix(nrow = length(pminfo$fid), ncol = length(files.name))
@@ -93,7 +118,7 @@ for (i in 1:length(files.name)) {
 
 ## obtem os índices assim como os armazena no espaço selecionado acima
 for (i in 1:length(files.name)) {
-#  aux <- h5read("myhdf5file.h5", "analysis/dataset", index = list(NULL, i))
+  aux <- h5read("myhdf5file.h5", "analysis/dataset", index = list(NULL, i))
   aux <- order(pm[,i])
   h5write(aux, "myhdf5file.h5", "analysis/index0", index = list(NULL,i))
 }
