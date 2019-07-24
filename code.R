@@ -42,26 +42,9 @@ h5createGroup("myhdf5file.h5", "analysis")
 h5createDataset(file = "myhdf5file.h5", dataset = "analysis/dataset", dims = dim, maxdims = dim, storage.mode = "double", chunk = dim, level = 5, showWarnings = FALSE)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-## cria objeto da classe arrayRealizationSink para processamento em bloco,
-## assim como o "bloco" que será utilizado
-real.sink <- RealizationSink(dim = dim, dimnames = NULL, type = "double")
-block <- colGrid(real.sink, ncol = 100)
-
 ## determina um limite para a quantidade de dados que seram processadas,
 ## bem como será o tipo de leitura dos dados (HDF5)
-makeCappedVolumeBox(maxvol = 50000000, maxdim = c(500000,100), shape = "first-dim-grows-first")
+makeCappedVolumeBox(maxvol = 500000000, maxdim = c(5000000,100), shape = "first-dim-grows-first")
 setRealizationBackend("HDF5Array")
 
 ## armazena os dados no arquivo criado acima já com o background corrigido pelo método rma
@@ -69,18 +52,11 @@ setRealizationBackend("HDF5Array")
 ### ARMAZENAR A MATRIZ COM OS DADOS E DEMAIS INFORMAÇÕES PARA O ARQUIVO HDF5 EM ESPAÇOS DE MEMÓRIA SEPARADOS
 
 #importação por blocos de 100 colunas
-#num.blocks <- length(files.name) %/% 100
-#length.last.block <-length(files.name) %% 100
-#i <- 0
-#dim(files.name) <- c(1, length(files.name))
-#apply(files.name, 2, function(name.celfile){
-#  i <- i+1
-#  h5write(read.celfiles(name.celfile), "myhdf5file.h5", "analysis/fulldata", index = list(NULL,i))
-#}) 
+
 
 #importação por amostra sem background corrigido
 for (i in seq_along(files.name)) {
-  aux <- read.celfile(files.name[1], intensity.means.only = T)[["INTENSITY"]][["MEAN"]]
+  aux <- read.celfile(files.name[i], intensity.means.only = T)[["INTENSITY"]][["MEAN"]]
   h5write(aux, "myhdf5file.h5", "analysis/index1", index = list(NULL,i))
 }
 
@@ -96,49 +72,114 @@ for (i in seq_along(files.name)) {
   h5write(aux, "myhdf5file.h5", "analysis/dataset", index = list(NULL,i))
 }
 
-## seleciona outro espaço de memória para armazenar os dados dos índices 
-#h5createDataset(file = "myhdf5file.h5", dataset = "analysis/index0", dims = c(length(pminfo$fid), length(files.name)), maxdims = dim, storage.mode = "double", chunk = dim, level = 5, showWarnings = FALSE)
-
 
 h5closeAll()
 h5f <- H5Fopen("myhdf5file.h5")
 h5g <- H5Gopen(h5f, "analysis")
 #h5d <- H5Dopen(h5g, "dataset")
-h5id <- H5Dopen(h5g, "index1")
+#h5id <- H5Dopen(h5g, "index1")
 
 ## localiza os dados de expressão na memória
-data <- realize(h5g$index1)
+#data <- realize(h5g$test)
 
-## seleciona apenas PM
-pm <- matrix(nrow = length(pminfo$fid), ncol = length(files.name))
-for (i in 1:length(files.name)) {
-  aux <- data[,i]
-  pm[,i] <- aux[pminfo$fid]
+## Reserva um espaço de memória para salvar os PM
+h5createDataset(file = "myhdf5file.h5", dataset = "analysis/PM", dims = c(length(pminfo$fid), length(files.name)), maxdims = c(length(pminfo$fid), length(files.name)), storage.mode = "double", chunk = c(length(pminfo$fid), length(files.name)), level = 5, showWarnings = FALSE)
+
+## cria objetos da classe arrayRealizationSink para processamentos em bloco,
+## assim como os "blocos" que serão utilizados
+dim <- as.integer(dim)
+real.sink <- RealizationSink(dim = dim, dimnames = NULL, type = "double")
+real.sink.pm <- RealizationSink(dim = c(nrow(pminfo), length(files.name)), dimnames = NULL, type = "double")
+block.pm <- colGrid(real.sink.pm, ncol = 30)
+block.pm.row <- rowGrid(real.sink.pm, nrow = 100000)
+block <- colGrid(real.sink, ncol = 30)
+
+## Salva os PM em HDF5
+begin <- 1
+end <- ncol(block[[1L]])
+for (i in seq_along(block)) {
+  aux <- h5read(h5g, "test", index = list(NULL, begin:end))
+  aux <- apply(aux, 2, "[", pminfo$fid)
+  h5write(aux, "myhdf5file.h5", "analysis/PM", index = list(NULL, begin:end))
+  begin <- begin + ncol(block[[i]])
+  ifelse(test = i == length(block)-1, yes = end <- end + ncol(block[[length(block)]]), no = end <- end + ncol(block[[i]]))
+  }
+
+
+## Reserva um espaço de memória para salvar os PM com background corrigido
+h5createDataset(file = "myhdf5file.h5", dataset = "analysis/background(PM)", dims = c(length(pminfo$fid), length(files.name)), maxdims = c(length(pminfo$fid), length(files.name)), storage.mode = "double", chunk = c(length(pminfo$fid), length(files.name)), level = 5, showWarnings = FALSE)
+
+
+## Salva os PM com background corrigido em HDF5
+begin <- 1
+end <- ncol(block.pm[[1L]])
+for (i in seq_along(block.pm)) {
+  aux <- h5read(h5g, "PM", index = list(NULL, begin:end))
+  aux <- apply(aux, 2, backgroundCorrect.matrix, normexp.method = "rma", verbose = TRUE)
+  h5write(aux, "myhdf5file.h5", "analysis/background(PM)", index = list(NULL, begin:end))
+  begin <- begin + ncol(block.pm[[i]])
+  ifelse(test = i == length(block.pm)-1, yes = end <- end + ncol(block.pm[[length(block.pm)]]), no = end <- end + ncol(block.pm[[i]]))
 }
 
-## obtem os índices assim como os armazena no espaço selecionado acima
-for (i in 1:length(files.name)) {
-  aux <- h5read("myhdf5file.h5", "analysis/dataset", index = list(NULL, i))
-  aux <- order(pm[,i])
-  h5write(aux, "myhdf5file.h5", "analysis/index0", index = list(NULL,i))
+
+## Reserva um espaço de memória para salvar os índices dos PM com background corrigido
+h5createDataset(file = "myhdf5file.h5", dataset = "analysis/indexbg(PM)", dims = c(length(pminfo$fid), length(files.name)), maxdims = c(length(pminfo$fid), length(files.name)), storage.mode = "double", chunk = c(length(pminfo$fid), length(files.name)), level = 5, showWarnings = FALSE)
+
+## Obtém os índices dos PM com background corrigido, assim como os armazena no espaço de memória selecionado acima
+begin <- 1
+end <- ncol(block.pm[[1L]])
+for (i in seq_along(block.pm)) {
+  aux <- h5read(h5g, "background(PM)", index = list(NULL, begin:end))
+  aux <- apply(aux, 2, order)
+  h5write(aux, "myhdf5file.h5", "analysis/indexbg(PM)", index = list(NULL, begin:end))
+  begin <- begin + ncol(block.pm[[i]])
+  ifelse(test = i == length(block.pm)-1, yes = end <- end + ncol(block.pm[[length(block.pm)]]), no = end <- end + ncol(block.pm[[i]]))
 }
 
-pm <- apply(pm, 2, sort) ## ordena-os PM do menor para o maior
-mu <- apply(pm, 1, mean) ## calcula a média das linhas dos PM
+
+## Reserva um espaço de memória para salvar os PM com background corrigido e normalizados
+h5createDataset(file = "myhdf5file.h5", dataset = "analysis/normalize(PM)", dims = c(length(pminfo$fid), length(files.name)), maxdims = c(length(pminfo$fid), length(files.name)), storage.mode = "double", chunk = c(length(pminfo$fid), length(files.name)), level = 5, showWarnings = FALSE)
+
+## Ordena do menor para o maior os PM com background corrigido
+begin <- 1
+end <- ncol(block.pm[[1L]])
+for (i in seq_along(block.pm)) {
+  aux <- h5read(h5g, "background(PM)", index = list(NULL, begin:end))
+  aux <- apply(aux, 2, sort)
+  h5write(aux, "myhdf5file.h5", "analysis/normalize(PM)", index = list(NULL, begin:end))
+  begin <- begin + ncol(block.pm[[i]])
+  ifelse(test = i == length(block.pm)-1, yes = end <- end + ncol(block.pm[[length(block.pm)]]), no = end <- end + ncol(block.pm[[i]]))
+}
+
+
+## Obtém as médias das linhas da matrix dos PM com background corrigido e ordenados, assim como os armazena no espaço de memória selecionado acima
+begin <- 1
+end <- nrow(block.pm.row[[1L]])
+for (i in seq_along(block.pm.row)) {
+  aux <- h5read(h5g, "normalize(PM)", index = list(begin:end, NULL))
+  aux <- apply(aux, 1, mean)
+  h5write(aux, "myhdf5file.h5", "analysis/normalize(PM)", index = list(begin:end, NULL))
+  begin <- begin + nrow(block.pm.row[[i]])
+  ifelse(test = i == length(block.pm.row)-1, yes = end <- end + nrow(block.pm.row[[length(block.pm.row)]]), no = end <- end + nrow(block.pm.row[[i]]))
+}
+
+
+#pm <- apply(pm, 2, sort) ## ordena-os PM do menor para o maior
+#mu <- apply(pm, 1, mean) ## calcula a média das linhas dos PM
 
 ## atribui a cada linha o valor de sua respectiva média
 for (i in 1:length(mu)) {
-  pm[i, ] <- rep(mu[i], length(files.name))
+  pm[i, ] <- rep(mu[i], length(files.name),)
 }
 
 ## localiza os dados dos índices e reordena os dados de expressão
-id <- realize(h5g$index0)
-for(i in 1:length(files.name)){
-    aux <- id[ ,i]
-    newaux <- pm[,i]
-    newaux <- newaux[order(aux)]
-    pm[ ,i] <- newaux
-}
+#id <- realize(h5g$index0)
+#for(i in 1:length(files.name)){
+#    aux <- id[ ,i]
+#    newaux <- pm[,i]
+#    newaux <- newaux[order(aux)]
+#    pm[ ,i] <- newaux
+#}
 
 ## armazena os dados com PM com background corrigido e normalizado 
 for (i in 1:length(files.name)) {
@@ -169,16 +210,16 @@ for (j in 1:length(genes.id)) {
   }
 
 ## cria "grades" para processamento em blocos  
-original.grid <- blockGrid(data, block.length = 5000000, block.shape = "first-dim-grows-first")
-medpolish.grid <- blockGrid(data, block.length = 5000000, block.shape = "first-dim-grows-first")
+#original.grid <- blockGrid(data, block.length = 5000000, block.shape = "first-dim-grows-first")
+#medpolish.grid <- blockGrid(data, block.length = 5000000, block.shape = "first-dim-grows-first")
 
 ## aplica o polimento de mediana em blocos 
-for(i in seq_along(original.grid)){
-  original.block <- read_block(data, original.grid[[i]])
-  medpolish.block <- medpolish(original.block)$residuals
-  return.block <- original.block - medpolish.block
-  data <- write_block(data, original.grid[[i]], return.block)
-}
+#for(i in seq_along(original.grid)){
+#  original.block <- read_block(data, original.grid[[i]])
+#  medpolish.block <- medpolish(original.block)$residuals
+#  return.block <- original.block - medpolish.block
+#  data <- write_block(data, original.grid[[i]], return.block)
+#}
 
 ## salva os dados processados 
 for (i in 1:length(files.name)) {
