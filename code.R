@@ -44,7 +44,7 @@ h5createDataset(file = "myhdf5file.h5", dataset = "analysis/dataset", dims = dim
 
 ## determina um limite para a quantidade de dados que seram processadas,
 ## bem como será o tipo de leitura dos dados (HDF5)
-makeCappedVolumeBox(maxvol = 500000000, maxdim = c(5000000,100), shape = "first-dim-grows-first")
+#makeCappedVolumeBox(maxvol = 500000000, maxdim = c(5000000,100), shape = "first-dim-grows-first")
 setRealizationBackend("HDF5Array")
 
 ## armazena os dados no arquivo criado acima já com o background corrigido pelo método rma
@@ -158,19 +158,23 @@ end <- nrow(block.pm.row[[1L]])
 for (i in seq_along(block.pm.row)) {
   aux <- h5read(h5g, "normalize(PM)", index = list(begin:end, NULL))
   aux <- apply(aux, 1, mean)
+  aux <- rep(aux, each = length(files.name))
+  aux <- matrix(data = aux, nrow = nrow(block.pm.row[[i]]), ncol = length(files.name), byrow = TRUE)
   h5write(aux, "myhdf5file.h5", "analysis/normalize(PM)", index = list(begin:end, NULL))
   begin <- begin + nrow(block.pm.row[[i]])
   ifelse(test = i == length(block.pm.row)-1, yes = end <- end + nrow(block.pm.row[[length(block.pm.row)]]), no = end <- end + nrow(block.pm.row[[i]]))
 }
 
 
+
+
 #pm <- apply(pm, 2, sort) ## ordena-os PM do menor para o maior
 #mu <- apply(pm, 1, mean) ## calcula a média das linhas dos PM
 
 ## atribui a cada linha o valor de sua respectiva média
-for (i in 1:length(mu)) {
-  pm[i, ] <- rep(mu[i], length(files.name),)
-}
+#for (i in 1:length(mu)) {
+#  pm[i, ] <- rep(mu[i], length(files.name))
+#}
 
 ## localiza os dados dos índices e reordena os dados de expressão
 #id <- realize(h5g$index0)
