@@ -62,15 +62,15 @@ for (i in seq_along(files.name)) {
 
 
 #importação por amostra com background corrigido
-for (i in seq_along(files.name)) {
-  aux <- read.celfile(files.name[i], intensity.means.only = TRUE)[["INTENSITY"]][["MEAN"]] ## armazena uma amostra
-  newaux <- aux[pminfo$fid] ## seleciona apenas PM
-  newaux <- backgroundCorrect.matrix(newaux, normexp.method = "rma", verbose = TRUE) ## realiza correção de ruído de fundo
-  dim(newaux) <- c(NULL) 
-  aux <- insert(aux, pminfo$fid, newaux) ## devolve PM com ruído de fundo corrigido
-  aux <- aux[-((pminfo$fid)+c(1:length(pminfo$fid)))] ## extrai PM crus
-  h5write(aux, "myhdf5file.h5", "analysis/dataset", index = list(NULL,i))
-}
+#for (i in seq_along(files.name)) {
+#  aux <- read.celfile(files.name[i], intensity.means.only = TRUE)[["INTENSITY"]][["MEAN"]] ## armazena uma amostra
+#  newaux <- aux[pminfo$fid] ## seleciona apenas PM
+#  newaux <- backgroundCorrect.matrix(newaux, normexp.method = "rma", verbose = TRUE) ## realiza correção de ruído de fundo
+#  dim(newaux) <- c(NULL) 
+#  aux <- insert(aux, pminfo$fid, newaux) ## devolve PM com ruído de fundo corrigido
+#  aux <- aux[-((pminfo$fid)+c(1:length(pminfo$fid)))] ## extrai PM crus
+#  h5write(aux, "myhdf5file.h5", "analysis/dataset", index = list(NULL,i))
+#}
 
 
 h5closeAll()
@@ -90,8 +90,8 @@ h5createDataset(file = "myhdf5file.h5", dataset = "analysis/PM", dims = c(length
 dim <- as.integer(dim)
 real.sink <- RealizationSink(dim = dim, dimnames = NULL, type = "double")
 real.sink.pm <- RealizationSink(dim = c(nrow(pminfo), length(files.name)), dimnames = NULL, type = "double")
-block.pm <- colGrid(real.sink.pm, ncol = 30)
-block.pm.row <- rowGrid(real.sink.pm, nrow = 100000)
+block.pm <- colGrid(real.sink.pm, ncol = 100)
+block.pm.row <- rowGrid(real.sink.pm, nrow = 30000)
 block <- colGrid(real.sink, ncol = 30)
 
 ## Salva os PM em HDF5
@@ -152,7 +152,7 @@ for (i in seq_along(block.pm)) {
 }
 
 
-## Obtém as médias das linhas da matrix dos PM com background corrigido e ordenados, assim como os armazena no espaço de memória selecionado acima
+## Obtém as médias das linhas da matrix dos PM com background corrigido e ordenados e as insere em todas as colunas, assim como armazena no espaço de memória selecionado acima
 begin <- 1
 end <- nrow(block.pm.row[[1L]])
 for (i in seq_along(block.pm.row)) {
@@ -165,6 +165,20 @@ for (i in seq_along(block.pm.row)) {
   ifelse(test = i == length(block.pm.row)-1, yes = end <- end + nrow(block.pm.row[[length(block.pm.row)]]), no = end <- end + nrow(block.pm.row[[i]]))
 }
 
+
+## Reordena os PM em sua ordem original
+begin <- 1
+end <- ncol(block.pm[[1L]])
+for (i in seq_along(block.pm)) {
+  aux <- h5read(h5g, "normalize(PM)", index = list(NULL, begin:end))
+  aux1 <- h5read(h5g, "indexbg(PM)", index = list(NULL, begin:end))
+  for(j in seq(ncol(aux))){
+    aux[,j] <- aux[,j][aux1[,j]]
+  }
+  h5write(aux, "myhdf5file.h5", "analysis/normalize(PM)", index = list(NULL, begin:end))
+  begin <- begin + ncol(block.pm[[i]])
+  ifelse(test = i == length(block.pm)-1, yes = end <- end + ncol(block.pm[[length(block.pm)]]), no = end <- end + ncol(block.pm[[i]]))
+}
 
 
 
@@ -185,20 +199,69 @@ for (i in seq_along(block.pm.row)) {
 #    pm[ ,i] <- newaux
 #}
 
-## armazena os dados com PM com background corrigido e normalizado 
-for (i in 1:length(files.name)) {
-  aux <- data[,i]
-  newaux <- pm[,i]
-  aux <- insert(aux, pminfo$fid, newaux) ## devolve PM com background corrigido e normalizado
-  aux <- aux[-((pminfo$fid)+c(1:length(pminfo$fid)))] ## extrai PM apenas com background corrigido
-  h5write(aux, "myhdf5file.h5", "analysis/test", index = list(NULL,i))  
+## armazena os dados com PM com background corrigido e normalizado no banco de dados original
+begin <- 1
+end <- ncol(block.pm[[1L]])
+for (i in seq_along(block.pm)) {
+  aux1 <- h5read(h5g, "normalize(PM)", index = list(NULL, begin:end))
+  aux <- h5read(h5g, "test", index = list(NULL, begin:end))
+  for(j in seq(ncol(aux))){
+    aux[,j] <- insert(aux[,j], pminfo$fid, aux1[,j])[-((pminfo$fid)+c(1:length(pminfo$fid)))]
+  }
+  h5write(aux, "myhdf5file.h5", "analysis/test", index = list(NULL, begin:end))
+  begin <- begin + ncol(block.pm[[i]])
+  ifelse(test = i == length(block.pm)-1, yes = end <- end + ncol(block.pm[[length(block.pm)]]), no = end <- end + ncol(block.pm[[i]]))
 }
+
+
+#for (i in 1:length(files.name)) {
+#  aux <- data[,i]
+# newaux <- pm[,i]
+#  aux <- insert(aux, pminfo$fid, newaux) ## devolve PM com background corrigido e normalizado
+#  aux <- aux[-((pminfo$fid)+c(1:length(pminfo$fid)))] ## extrai PM apenas com background corrigido
+#  h5write(aux, "myhdf5file.h5", "analysis/test", index = list(NULL,i))  
+#}
+
+## Reserva um espaço de memória para salvar os PM com background corrigido, normalizados e sumarizados
+h5createDataset(file = "myhdf5file.h5", dataset = "analysis/summarize(PM)", dims = c(length(unique(pminfo$fsetid)), length(files.name)), maxdims = c(length(unique(pminfo$fsetid)), length(files.name)), storage.mode = "double", chunk = c(length(unique(pminfo$fsetid)), length(files.name)), level = 5, showWarnings = FALSE)
+
 
 ## cria objeto onde serão armazenadas as matrizes de PM para cada gene 
 pminfo <- as_tibble(pminfo) 
 genes.id <- unique(pminfo$fsetid) ## armazena todos os indentificadores dos genes 
 genes.pm <- c()
 exprs.values <- c()
+exprs.values.matrix <- c()
+
+begin.row <- 1
+end.row <- nrow(block.pm.row[[1L]])
+for (h in seq_along(block.pm.row)) {
+  sapply(genes.id, invisible(function(id){
+    exprs.values <- c()
+    begin <- 1
+    end <- ncol(block.pm[[1L]])
+    pminfo.specific.gene <- filter(pminfo, pminfo$fsetid == id)
+    for (i in seq_along(block.pm)) {
+      aux <- h5read(h5g, "test", index = list(NULL, begin:end))
+      genes.pm <- sapply(X = seq(ncol(aux)), FUN = invisible(function(j){
+                    genes.pm <- cbind(genes.pm, aux[,j][pminfo.specific.gene$fid])
+                  }))
+      print(genes.pm)
+      column.effect <- medpolish(genes.pm)$col
+      genes.pm <- sweep(genes.pm, 2, column.effect)
+      genes.pm <- apply(genes.pm, 2, mean)
+      exprs.values <- c(exprs.values, log(genes.pm,2))
+      begin <- begin + ncol(block.pm[[i]])
+      ifelse(test = i == length(block.pm)-1, yes = end <- end + ncol(block.pm[[length(block.pm)]]), no = end <- end + ncol(block.pm[[i]]))
+      genes.pm <- c()
+    }
+    exprs.values.matrix <- rbind(exprs.values.matrix, exprs.values)
+  }))
+  h5write(exprs.values.matrix, "myhdf5file.h5", "analysis/summarize(PM)", index = list(begin.row:end.row, NULL))
+  begin.row <- begin.row + ncol(block.pm.row[[h]])
+  ifelse(test = h == length(block.pm.row)-1, yes = end.row <- end.row + ncol(block.pm.row[[length(block.pm.row)]]), no = end.row <- end.row + ncol(block.pm.row[[h]]))
+}
+
 
 ## armazena as matrizes com os PM de cada gene para todas as amostras
 for (j in 1:length(genes.id)) {
@@ -212,6 +275,7 @@ for (j in 1:length(genes.id)) {
   genes.pm <- apply(genes.pm, 2, mean)
   exprs.values <- rbind(exprs.values, genes.pm)
   }
+
 
 ## cria "grades" para processamento em blocos  
 #original.grid <- blockGrid(data, block.length = 5000000, block.shape = "first-dim-grows-first")
