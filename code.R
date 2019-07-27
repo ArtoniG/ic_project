@@ -47,12 +47,38 @@ h5createDataset(file = "myhdf5file.h5", dataset = "analysis/dataset", dims = dim
 #makeCappedVolumeBox(maxvol = 500000000, maxdim = c(5000000,100), shape = "first-dim-grows-first")
 setRealizationBackend("HDF5Array")
 
-## armazena os dados no arquivo criado acima já com o background corrigido pelo método rma
+## cria objetos da classe arrayRealizationSink para processamentos em bloco,
+## assim como os "blocos" que serão utilizados
+dim <- as.integer(dim)
+real.sink <- RealizationSink(dim = dim, dimnames = NULL, type = "double")
+real.sink.pm <- RealizationSink(dim = c(nrow(pminfo), length(files.name)), dimnames = NULL, type = "double")
+real.sink.summarize <- RealizationSink(dim = c(length(unique(pminfo$fsetid)), length(files.name)), dimnames = NULL, type = "double")
+block.pm <- colGrid(real.sink.pm, ncol = 50)
+block.pm.row <- rowGrid(real.sink.summarize, nrow = 30000)
+block <- colGrid(real.sink, ncol = 100)
+
 
 ### ARMAZENAR A MATRIZ COM OS DADOS E DEMAIS INFORMAÇÕES PARA O ARQUIVO HDF5 EM ESPAÇOS DE MEMÓRIA SEPARADOS
 
 #importação por blocos de 100 colunas
+begin <- 1
+end <- ncol(block[[1L]])
+for (i in seq_along(block)) {
+  aux <- read.celfile(files.name[begin:end], intensity.means.only = T)[["INTENSITY"]][["MEAN"]]
+  h5write(aux, "myhdf5file.h5", "analysis/index1", index = list(NULL, begin:end))
+  begin <- begin + ncol(block[[i]])
+  ifelse(test = i == length(block)-1, yes = end <- end + ncol(block[[length(block)]]), no = end <- end + ncol(block[[i]]))
+}
 
+begin <- 1
+end <- ncol(block[[1L]])
+for (i in seq_along(block)) {
+  aux <- read.celfiles(files.name[begin:end])
+  aux <- exprs(aux)
+  h5write(aux, "myhdf5file.h5", "analysis/index1", index = list(NULL, begin:end))
+  begin <- begin + ncol(block[[i]])
+  ifelse(test = i == length(block)-1, yes = end <- end + ncol(block[[length(block)]]), no = end <- end + ncol(block[[i]]))
+}
 
 #importação por amostra sem background corrigido
 for (i in seq_along(files.name)) {
@@ -61,7 +87,7 @@ for (i in seq_along(files.name)) {
 }
 
 
-#importação por amostra com background corrigido
+## armazena os dados em HDF5 já com o background corrigido pelo método rma
 #for (i in seq_along(files.name)) {
 #  aux <- read.celfile(files.name[i], intensity.means.only = TRUE)[["INTENSITY"]][["MEAN"]] ## armazena uma amostra
 #  newaux <- aux[pminfo$fid] ## seleciona apenas PM
@@ -85,14 +111,6 @@ h5g <- H5Gopen(h5f, "analysis")
 ## Reserva um espaço de memória para salvar os PM
 h5createDataset(file = "myhdf5file.h5", dataset = "analysis/PM", dims = c(length(pminfo$fid), length(files.name)), maxdims = c(length(pminfo$fid), length(files.name)), storage.mode = "double", chunk = c(length(pminfo$fid), length(files.name)), level = 5, showWarnings = FALSE)
 
-## cria objetos da classe arrayRealizationSink para processamentos em bloco,
-## assim como os "blocos" que serão utilizados
-dim <- as.integer(dim)
-real.sink <- RealizationSink(dim = dim, dimnames = NULL, type = "double")
-real.sink.pm <- RealizationSink(dim = c(nrow(pminfo), length(files.name)), dimnames = NULL, type = "double")
-block.pm <- colGrid(real.sink.pm, ncol = 100)
-block.pm.row <- rowGrid(real.sink.pm, nrow = 30000)
-block <- colGrid(real.sink, ncol = 30)
 
 ## Salva os PM em HDF5
 begin <- 1
@@ -103,7 +121,7 @@ for (i in seq_along(block)) {
   h5write(aux, "myhdf5file.h5", "analysis/PM", index = list(NULL, begin:end))
   begin <- begin + ncol(block[[i]])
   ifelse(test = i == length(block)-1, yes = end <- end + ncol(block[[length(block)]]), no = end <- end + ncol(block[[i]]))
-  }
+}
 
 
 ## Reserva um espaço de memória para salvar os PM com background corrigido
@@ -236,17 +254,18 @@ exprs.values.matrix <- c()
 begin.row <- 1
 end.row <- nrow(block.pm.row[[1L]])
 for (h in seq_along(block.pm.row)) {
-  sapply(genes.id, invisible(function(id){
-    exprs.values <- c()
-    begin <- 1
-    end <- ncol(block.pm[[1L]])
-    pminfo.specific.gene <- filter(pminfo, pminfo$fsetid == id)
+  exprs.values.matrix <- invisible(sapply(genes.id, function(id){
+    exprs.values <<- c()
+    begin <<- 1
+    end <<- ncol(block.pm[[1L]])
+    pminfo.specific.gene <<- filter(pminfo, pminfo$fsetid == id)
     for (i in seq_along(block.pm)) {
+      invisible(gc())
+      invisible(gc())
       aux <- h5read(h5g, "test", index = list(NULL, begin:end))
-      genes.pm <- sapply(X = seq(ncol(aux)), FUN = invisible(function(j){
-                    genes.pm <- cbind(genes.pm, aux[,j][pminfo.specific.gene$fid])
-                  }))
-      print(genes.pm)
+      for (j in seq(ncol(aux))) {
+        genes.pm <- cbind(genes.pm, aux[,j][pminfo.specific.gene$fid])
+      }
       column.effect <- medpolish(genes.pm)$col
       genes.pm <- sweep(genes.pm, 2, column.effect)
       genes.pm <- apply(genes.pm, 2, mean)
@@ -255,12 +274,45 @@ for (h in seq_along(block.pm.row)) {
       ifelse(test = i == length(block.pm)-1, yes = end <- end + ncol(block.pm[[length(block.pm)]]), no = end <- end + ncol(block.pm[[i]]))
       genes.pm <- c()
     }
-    exprs.values.matrix <- rbind(exprs.values.matrix, exprs.values)
+    exprs.values.matrix <<- rbind(exprs.values.matrix, exprs.values)
   }))
   h5write(exprs.values.matrix, "myhdf5file.h5", "analysis/summarize(PM)", index = list(begin.row:end.row, NULL))
-  begin.row <- begin.row + ncol(block.pm.row[[h]])
-  ifelse(test = h == length(block.pm.row)-1, yes = end.row <- end.row + ncol(block.pm.row[[length(block.pm.row)]]), no = end.row <- end.row + ncol(block.pm.row[[h]]))
+  begin.row <<- begin.row + ncol(block.pm.row[[h]])
+  ifelse(test = h == length(block.pm.row)-1, yes = end.row <<- end.row + ncol(block.pm.row[[length(block.pm.row)]]), no = end.row <<- end.row + ncol(block.pm.row[[h]]))
 }
+
+
+
+begin.row <- 1
+end.row <- nrow(block.pm.row[[1L]])
+for (h in seq_along(block.pm.row)) {
+  invisible(sapply(genes.id, function(id){
+    assign("pminfo.specific.gene", filter(pminfo, pminfo$fsetid == id), .GlobalEnv)
+    assign("exprs.values", NULL, .GlobalEnv)
+    assign("begin", 1, globalenv())
+    assign("end", ncol(block.pm[[1L]]), .GlobalEnv)
+    for (i in seq_along(block.pm)) {
+      invisible(gc())
+      invisible(gc()) 
+      assign("aux", h5read(h5g, "test", index = list(NULL, begin:end)), .GlobalEnv)
+      invisible(sapply(X = seq(ncol(aux)), FUN = function(j){
+        assign("genes.pm", cbind(genes.pm, aux[,j][pminfo.specific.gene$fid]), .GlobalEnv)
+      }, simplify = T))
+      assign("column.effect", medpolish(genes.pm)$col, globalenv())
+      assign("genes.pm", sweep(genes.pm, 2, column.effect), globalenv())
+      assign("genes.pm", apply(genes.pm, 2, mean), globalenv()) 
+      assign("exprs.values", c(exprs.values, log(genes.pm,2)), globalenv())
+      assign("begin", begin + ncol(block.pm[[i]]), globalenv())
+      ifelse(test = i == length(block.pm)-1, yes = assign("end", end + ncol(block.pm[[length(block.pm)]]), globalenv()), no = assign("end", end + ncol(block.pm[[i]]), globalenv()))
+      assign("genes.pm", NULL, globalenv())
+    }
+    assign("exprs.values.matrix", rbind(exprs.values.matrix, exprs.values), globalenv())
+  }))
+  h5write(exprs.values.matrix, "myhdf5file.h5", "analysis/summarize(PM)", index = list(begin.row:end.row, NULL))
+  begin.row <<- begin.row + ncol(block.pm.row[[h]])
+  ifelse(test = h == length(block.pm.row)-1, yes = end.row <<- end.row + ncol(block.pm.row[[length(block.pm.row)]]), no = end.row <<- end.row + ncol(block.pm.row[[h]]))
+}
+
 
 
 ## armazena as matrizes com os PM de cada gene para todas as amostras
