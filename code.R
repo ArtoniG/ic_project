@@ -5,7 +5,7 @@ library(affyio)
 library(limma)
 library(R.utils)
 library(dplyr)
-library(sqldf)
+
 
 
 ###### FUNÇÃO QUE IMPORTA OS DADOS COMO HDF5
@@ -53,22 +53,22 @@ dim <- as.integer(dim)
 real.sink <- RealizationSink(dim = dim, dimnames = NULL, type = "double")
 real.sink.pm <- RealizationSink(dim = c(nrow(pminfo), length(files.name)), dimnames = NULL, type = "double")
 real.sink.summarize <- RealizationSink(dim = c(length(unique(pminfo$fsetid)), length(files.name)), dimnames = NULL, type = "double")
-block.pm <- colGrid(real.sink.pm, ncol = 50)
-block.pm.row <- rowGrid(real.sink.summarize, nrow = 30000)
+block.pm <- colGrid(real.sink.pm, ncol = 146)
+block.pm.row <- rowGrid(real.sink.summarize, nrow = 54675)
 block <- colGrid(real.sink, ncol = 100)
 
 
 ### ARMAZENAR A MATRIZ COM OS DADOS E DEMAIS INFORMAÇÕES PARA O ARQUIVO HDF5 EM ESPAÇOS DE MEMÓRIA SEPARADOS
 
 #importação por blocos de 100 colunas
-begin <- 1
-end <- ncol(block[[1L]])
-for (i in seq_along(block)) {
-  aux <- read.celfile(files.name[begin:end], intensity.means.only = T)[["INTENSITY"]][["MEAN"]]
-  h5write(aux, "myhdf5file.h5", "analysis/index1", index = list(NULL, begin:end))
-  begin <- begin + ncol(block[[i]])
-  ifelse(test = i == length(block)-1, yes = end <- end + ncol(block[[length(block)]]), no = end <- end + ncol(block[[i]]))
-}
+#begin <- 1
+#end <- ncol(block[[1L]])
+#for (i in seq_along(block)) {
+#  aux <- read.celfile(files.name[begin:end], intensity.means.only = T)[["INTENSITY"]][["MEAN"]]
+#  h5write(aux, "myhdf5file.h5", "analysis/index1", index = list(NULL, begin:end))
+#  begin <- begin + ncol(block[[i]])
+#  ifelse(test = i == length(block)-1, yes = end <- end + ncol(block[[length(block)]]), no = end <- end + ncol(block[[i]]))
+#}
 
 begin <- 1
 end <- ncol(block[[1L]])
@@ -106,7 +106,7 @@ h5g <- H5Gopen(h5f, "analysis")
 #h5id <- H5Dopen(h5g, "index1")
 
 ## localiza os dados de expressão na memória
-#data <- realize(h5g$test)
+data <- realize(h5g$test)
 
 ## Reserva um espaço de memória para salvar os PM
 h5createDataset(file = "myhdf5file.h5", dataset = "analysis/PM", dims = c(length(pminfo$fid), length(files.name)), maxdims = c(length(pminfo$fid), length(files.name)), storage.mode = "double", chunk = c(length(pminfo$fid), length(files.name)), level = 5, showWarnings = FALSE)
@@ -312,6 +312,48 @@ for (h in seq_along(block.pm.row)) {
   begin.row <<- begin.row + ncol(block.pm.row[[h]])
   ifelse(test = h == length(block.pm.row)-1, yes = end.row <<- end.row + ncol(block.pm.row[[length(block.pm.row)]]), no = end.row <<- end.row + ncol(block.pm.row[[h]]))
 }
+
+
+pm.genes <- function(aux, genes.pm){
+  invisible(sapply(X = seq(ncol(aux)), FUN = function(j){
+    assign("genes.pm", cbind(genes.pm, aux[,j][pminfo.specific.gene$fid]), .GlobalEnv)
+  }, simplify = T))
+}
+
+summarize.by.block <- function(block.pm, begin, end, genes.pm, exprs.values){
+  for (i in seq_along(block.pm)) {
+    invisible(gc())
+    invisible(gc()) 
+    assign("aux", h5read(h5g, "test", index = list(NULL, begin:end)), .GlobalEnv)
+    genes.pm <- pm.genes(aux, genes.pm)
+    assign("column.effect", medpolish(genes.pm)$col, globalenv())
+    assign("genes.pm", sweep(genes.pm, 2, column.effect), globalenv())
+    assign("genes.pm", apply(genes.pm, 2, mean), globalenv()) 
+    assign("exprs.values", c(exprs.values, log(genes.pm,2)), globalenv())
+    assign("begin", begin + ncol(block.pm[[i]]), globalenv())
+    ifelse(test = i == length(block.pm)-1, yes = assign("end", end + ncol(block.pm[[length(block.pm)]]), globalenv()), no = assign("end", end + ncol(block.pm[[i]]), globalenv()))
+    assign("genes.pm", NULL, globalenv())
+  }
+}
+
+# PREVISÃO DE 12 DIAS PARA RESULTADO FINAL DE 54675 GENES
+begin.row <- 1
+end.row <- nrow(block.pm.row[[1L]])
+for (h in seq_along(block.pm.row)) {
+  invisible(sapply(genes.id, function(id){
+    assign("pminfo.specific.gene", filter(pminfo, pminfo$fsetid == id), .GlobalEnv)
+    assign("exprs.values", NULL, .GlobalEnv)
+    assign("begin", 1, globalenv())
+    assign("end", ncol(block.pm[[1L]]), .GlobalEnv)
+    exprs.values <- summarize.by.block(block.pm, begin, end, genes.pm, exprs.values)
+    assign("exprs.values.matrix", rbind(exprs.values.matrix, exprs.values), globalenv())
+  }))
+  h5write(exprs.values.matrix, "myhdf5file.h5", "analysis/summarize(PM)", index = list(begin.row:end.row, NULL))
+  begin.row <<- begin.row + ncol(block.pm.row[[h]])
+  ifelse(test = h == length(block.pm.row)-1, yes = end.row <<- end.row + ncol(block.pm.row[[length(block.pm.row)]]), no = end.row <<- end.row + ncol(block.pm.row[[h]]))
+}
+
+
 
 
 
