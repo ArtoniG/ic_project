@@ -308,3 +308,54 @@ normalize.h5 <- function(){
 
 
 #######################################################################################################################################################################
+
+
+raw.with.pm <- function(){
+  
+  # Abre o arquivo HDF5 
+  h5f <- H5Fopen("myhdf5file.h5")
+  h5g <- H5Gopen(h5f, "analysis")
+  
+  # Define que os dados do disco serão reconhecidos como HDF5
+  setRealizationBackend("HDF5Array")
+  
+  # Reconhece os dados como HDF5 no environment
+  data <- realize(h5g$`normalize(PM)`)
+  
+  ## cria objetos da classe arrayRealizationSink para processamentos em blocos, assim como o "bloco" que será utilizado
+  real.sink <- RealizationSink(dim = c(length(pminfo$fid), length(files.name)), dimnames = NULL, type = "double")
+  block <- colGrid(real.sink, ncol = 100)   
+  
+  ## armazena os dados com PM com background corrigido e normalizado no banco de dados original
+  begin <- 1
+  end <- ncol(block.pm[[1L]])
+  for (i in seq_along(block.pm)) {
+    aux1 <- h5read(h5g, "normalize(PM)", index = list(NULL, begin:end))
+    aux <- h5read(h5g, "test", index = list(NULL, begin:end))
+    for(j in seq(ncol(aux))){
+      aux[,j] <- insert(aux[,j], pminfo$fid, aux1[,j])[-((pminfo$fid)+c(1:length(pminfo$fid)))]
+    }
+    h5write(aux, "myhdf5file.h5", "analysis/test", index = list(NULL, begin:end))
+    begin <- begin + ncol(block.pm[[i]])
+    ifelse(test = i == length(block.pm)-1, yes = end <- end + ncol(block.pm[[length(block.pm)]]), no = end <- end + ncol(block.pm[[i]]))
+  }
+  
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
