@@ -9,7 +9,7 @@ library(dplyr)
 
 # IMPORTAÇÃO DOS DADOS EM HDF5
 
-import.h5 <- function(pathdir, pkganno){
+import.h5 <- function(pathdir){
   
   ## Vai até o diretório no qual estão os arquivos .CEL
   setwd(pathdir)
@@ -199,17 +199,17 @@ ascend.indexPM <- function(){
   data <- realize(h5g$`background(PM)`)
   
   ## cria objetos da classe arrayRealizationSink para processamentos em blocos, assim como o "bloco" que será utilizado
-  real.sink <- RealizationSink(dim = c(length(pminfo$fid), length(files.name)), dimnames = NULL, type = "double")
+  real.sink <- RealizationSink(dim = dim(data), dimnames = NULL, type = "double")
   block <- colGrid(real.sink, ncol = 100)   
   
   ## Obtém os índices dos PM com background corrigido, assim como os armazena no espaço de memória selecionado acima
   begin <- 1
   end <- ncol(block[[1L]])
-  index.h5 <- as(matrix(nrow = length(pminfo$fid), ncol = length(files.name)), "HDF5Array")
+  index.h5 <- as(matrix(nrow = nrow(data), ncol = ncol(data)), "HDF5Array")
   for (i in seq_along(block)) {
     aux <- read_block(data, block[[i]])
     aux <- apply(aux, 2, order)
-    index.h5 <- as(write_block(index.h5, block[[i]], aux), "HDF5Array")    
+    index.h5 <- as(write_block(index.h5, block[[i]], aux), "HDF5Array")   
     begin <- begin + ncol(block[[i]])
     ifelse(test = i == length(block)-1, yes = end <- end + ncol(block[[length(block)]]), no = end <- end + ncol(block[[i]]))
   }
@@ -248,7 +248,7 @@ normalize.h5 <- function(){
 
   ## cria objetos da classe arrayRealizationSink para processamentos em blocos, assim como os "blocos" que serão utilizados
   real.sink <- RealizationSink(dim = c(length(unique(pminfo$fsetid)), length(files.name)), dimnames = NULL, type = "double")
-  block.col <- colGrid(real.sink.pm, ncol = 146)
+  block.col <- colGrid(real.sink, ncol = 146)
   block.row <- rowGrid(real.sink, nrow = 54675)
   
     
@@ -268,9 +268,7 @@ normalize.h5 <- function(){
   end <- nrow(block.row[[1L]])
   for (i in seq_along(block.row)) {
     aux <- h5read(h5g, "normalize(PM)", index = list(begin:end, NULL))
-    aux <- apply(aux, 1, mean)
-    aux <- rep(aux, each = length(files.name))
-    aux <- matrix(data = aux, nrow = nrow(block.pm.row[[i]]), ncol = length(files.name), byrow = TRUE)
+    aux <- matrix(data = rep(rowMeans(aux), each = length(files.name)), nrow = nrow(block.row[[i]]), ncol = length(files.name), byrow = TRUE )
     h5write(aux, h5g, "normalize(PM)", index = list(begin:end, NULL))
     begin <- begin + nrow(block.row[[i]])
     ifelse(test = i == length(block.row)-1, yes = end <- end + nrow(block.row[[length(block.row)]]), no = end <- end + nrow(block.row[[i]]))
@@ -282,7 +280,6 @@ normalize.h5 <- function(){
   index <- ascend.indexPM()
   for (i in seq_along(block.col)) {
     aux <- h5read(h5g, "normalize(PM)", index = list(NULL, begin:end))
-    #aux1 <- h5read(h5g, "indexbg(PM)", index = list(NULL, begin:end))
     aux1 <- index[,begin:end]
     for(j in seq(ncol(aux))){
       aux[,j] <- aux[,j][aux1[,j]]
@@ -310,8 +307,16 @@ normalize.h5 <- function(){
 #######################################################################################################################################################################
 
 
-raw.with.pm <- function(){
-  
+# CRIA UM OBJETO EM HDF5 COMO O RAW DATA, MAS SUBSTITUI OS PM RAW POR PM NORMALIZADOS  
+
+raw.with.pm.h5 <- function(){
+
+  ## cria conexão com banco de dados do pacote e extrai as informações dos perfect match
+  pkganno <- "pd.hg.u133.plus.2"  ### Why is not input.kind[[1]][["cdfName"]] ?
+  library(pkganno, character.only = TRUE)
+  conn <- db(get(pkganno))
+  pminfo <- dbGetQuery(conn, "SELECT * FROM pmfeature")  
+    
   # Abre o arquivo HDF5 
   h5f <- H5Fopen("myhdf5file.h5")
   h5g <- H5Gopen(h5f, "analysis")
@@ -320,42 +325,126 @@ raw.with.pm <- function(){
   setRealizationBackend("HDF5Array")
   
   # Reconhece os dados como HDF5 no environment
-  data <- realize(h5g$`normalize(PM)`)
+  data <- realize(h5g$dataset)
+  normalized.pm <- realize(h5g$`normalize(PM)`)
   
   ## cria objetos da classe arrayRealizationSink para processamentos em blocos, assim como o "bloco" que será utilizado
-  real.sink <- RealizationSink(dim = c(length(pminfo$fid), length(files.name)), dimnames = NULL, type = "double")
-  block <- colGrid(real.sink, ncol = 100)   
+  real.sink <- RealizationSink(dim = dim(data), dimnames = NULL, type = "double")
+  real.sink.pm <- RealizationSink(dim = dim(normalized.pm), dimnames = NULL, type = "double")
+  block <- colGrid(real.sink, ncol = 100)
+  block.pm <- colGrid(real.sink.pm, ncol = 100)   
+  
+  ## cria o objeto no qual serão salvos os raw data com os PM normalizados
+  raw.with.pm <- as(matrix(nrow = nrow(real.sink), ncol = ncol(real.sink)), "HDF5Array")
   
   ## armazena os dados com PM com background corrigido e normalizado no banco de dados original
   begin <- 1
   end <- ncol(block.pm[[1L]])
   for (i in seq_along(block.pm)) {
-    aux1 <- h5read(h5g, "normalize(PM)", index = list(NULL, begin:end))
-    aux <- h5read(h5g, "test", index = list(NULL, begin:end))
+    aux1 <- read_block(normalized.pm, block.pm[[i]])
+    aux <- read_block(data, block[[i]])
     for(j in seq(ncol(aux))){
       aux[,j] <- insert(aux[,j], pminfo$fid, aux1[,j])[-((pminfo$fid)+c(1:length(pminfo$fid)))]
     }
-    h5write(aux, "myhdf5file.h5", "analysis/test", index = list(NULL, begin:end))
+    raw.with.pm <- as(write_block(raw.with.pm, block[[i]], aux), "HDF5Array")
     begin <- begin + ncol(block.pm[[i]])
     ifelse(test = i == length(block.pm)-1, yes = end <- end + ncol(block.pm[[length(block.pm)]]), no = end <- end + ncol(block.pm[[i]]))
   }
   
+  # Fecha o arquivo .h5
+  h5closeAll()
+  
+  # Retorna os dados em formato .h5
+  return(raw.with.pm)      
 }
 
 
+###########################################################################################################################################################
 
 
+# CRIA UMA MATRIZ COM APENAS OS PM DE UM GENE ESPECÍFICO
 
+gene.specific.matrix <- function(raw.with.pm.h5.result, id){
+  
+  ## cria conexão com banco de dados do pacote e extrai as informações dos perfect match
+  pkganno <- "pd.hg.u133.plus.2"  ### Why is not input.kind[[1]][["cdfName"]] ?
+  library(pkganno, character.only = TRUE)
+  conn <- db(get(pkganno))
+  pminfo <- dbGetQuery(conn, "SELECT * FROM pmfeature")
+  pminfo <- as_tibble(pminfo) 
+  pminfo <- filter(pminfo, pminfo$fsetid == id)
+  
+  ## cria o objeto no qual será armazenada a matriz com os pm de um gene especifico
+  genes.pm <- as(matrix(nrow = nrow(pminfo), ncol = ncol(raw.with.pm.h5.result)), "HDF5Array")
+  
+  ## cria objetos da classe arrayRealizationSink para processamentos em blocos, assim como o "bloco" que será utilizado
+  real.sink <- RealizationSink(dim = dim(raw.with.pm.h5.result), dimnames = NULL, type = "double")
+  real.sink.pm <- RealizationSink(dim = dim(genes.pm), dimnames = NULL, type = "double")
+  block <- colGrid(real.sink, ncol = 50)
+  block.pm <- colGrid(real.sink.pm, ncol = 50)
+  
+  # Armazena a matriz dos PM para um gene específico em .h5
+  for (i in seq_along(block)) {
+    aux1 <- c()
+    aux <- read_block(data, block[[i]])
+    for (j in seq(ncol(aux))) {
+      aux1 <- cbind(aux1, aux[,j][pminfo$fid])
+    }
+    genes.pm <- write_block(genes.pm, block.pm[[i]], aux1)
+  }
+  
+  # Retorna os dados em formato .h5
+  return(genes.pm)
+}
+  
 
+################################################################################################################################################################
 
+# REALIZA A SUMARIZAÇÃO DOS DADOS
 
+summarize.by.block <- function(gene.specific.matrix.result){
 
+  ## cria conexão com banco de dados do pacote e extrai as informações dos perfect match
+  pkganno <- "pd.hg.u133.plus.2"  ### Why is not input.kind[[1]][["cdfName"]] ?
+  library(pkganno, character.only = TRUE)
+  conn <- db(get(pkganno))
+  pminfo <- dbGetQuery(conn, "SELECT * FROM pmfeature")  
+  
+  ## Abre o arquivo HDF5 
+  h5f <- H5Fopen("myhdf5file.h5")
+  h5g <- H5Gopen(h5f, "analysis")
+  
+  ## Reserva um espaço de memória para salvar os PM com background corrigido, normalizados e sumarizados
+  h5createDataset(file = h5g, dataset = "summarize(PM)", dims = c(length(unique(pminfo$fsetid)), length(files.name)), maxdims = c(length(unique(pminfo$fsetid)), length(files.name)), storage.mode = "double", chunk = c(length(unique(pminfo$fsetid)), length(files.name)), level = 5, showWarnings = FALSE)    
 
+  ## armazena todos os indentificadores dos genes
+  genes.id <- unique(pminfo$fsetid)
+  
+  ## salva o resultado de raw.with.pm.h5 em um objeto
+  raw.with.pm.result <- raw.with.pm.h5()
+  
+  ## cria um objeto no qual serão salvos os dados de expressão
+  exprs.values <- as(matrix(nrow = length(genes.id), ncol = ncol(raw.with.pm.result)), "HDF5Array")  
 
-
-
-
-
-
-
-
+  ## aplica a sumarização e salva os valores de expressão no objeto exprs.value
+  for (i in seq_along(genes.id)) {
+    genes.pm <- gene.specific.matrix(raw.with.pm.result, genes.id[i])
+    genes.pm <- log(colMeans(sweep(genes.pm, 2, medpolish(genes.pm)$col)),2)
+    exprs.values[i,] <- genes.pm
+  }
+  
+  ## Salva os valores de expressão em HDF5
+  h5writeDataset(exprs.values, h5g, "summarize(PM)")
+  
+  ## Define que os dados do disco serão reconhecidos como HDF5
+  setRealizationBackend("HDF5Array")
+  
+  ## Reconhece os valores de expressão no disco como HDF5 e salva no objeto normalized
+  summarized <- realize(h5g$`summarize(PM)`)
+  
+  # Fecha o arquivo .h5
+  h5closeAll()
+  
+  # Retorna os dados em formato .h5
+  return(summarized)    
+}
