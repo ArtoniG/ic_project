@@ -411,7 +411,8 @@ summarize.by.block <- function(gene.specific.matrix.result){
   pkganno <- "pd.hg.u133.plus.2"  ### Why is not input.kind[[1]][["cdfName"]] ?
   library(pkganno, character.only = TRUE)
   conn <- db(get(pkganno))
-  pminfo <- dbGetQuery(conn, "SELECT * FROM pmfeature")  
+  pminfo <- as_tibble(dbGetQuery(conn, "SELECT * FROM pmfeature"))
+  featinfo <- as_tibble(dbGetQuery(conn, "SELECT * FROM featureSet"))
   
   ## Abre o arquivo HDF5 
   h5f <- H5Fopen("myhdf5file.h5")
@@ -446,6 +447,12 @@ summarize.by.block <- function(gene.specific.matrix.result){
   
   ## Reconhece os valores de expressão no disco como HDF5 e salva no objeto normalized
   summarized <- realize(h5g$`summarize(PM)`)
+  
+  ## Nomeia as linhas e colunas do conjunto de dados
+  genes.id <- order(genes.id)
+  genes.id <- featinfo$man_fsetid[genes.id]
+  colnames(summarized) <- files.name
+  row.names(summarized) <- genes.id
   
   # Fecha o arquivo .h5
   h5closeAll()
