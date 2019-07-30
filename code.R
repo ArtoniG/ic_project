@@ -42,13 +42,10 @@ h5createGroup("myhdf5file.h5", "analysis")
 h5createDataset(file = "myhdf5file.h5", dataset = "analysis/dataset", dims = dim, maxdims = dim, storage.mode = "double", chunk = dim, level = 5, showWarnings = FALSE)
 
 
-## determina um limite para a quantidade de dados que seram processadas,
-## bem como será o tipo de leitura dos dados (HDF5)
-#makeCappedVolumeBox(maxvol = 500000000, maxdim = c(5000000,100), shape = "first-dim-grows-first")
+## determina como será o tipo de leitura dos dados (HDF5)
 setRealizationBackend("HDF5Array")
 
-## cria objetos da classe arrayRealizationSink para processamentos em bloco,
-## assim como os "blocos" que serão utilizados
+## cria objetos da classe arrayRealizationSink para processamentos em bloco, assim como os "blocos" que serão utilizados
 dim <- as.integer(dim)
 real.sink <- RealizationSink(dim = dim, dimnames = NULL, type = "double")
 real.sink.pm <- RealizationSink(dim = c(nrow(pminfo), length(files.name)), dimnames = NULL, type = "double")
@@ -60,15 +57,7 @@ block <- colGrid(real.sink, ncol = 100)
 
 ### ARMAZENAR A MATRIZ COM OS DADOS E DEMAIS INFORMAÇÕES PARA O ARQUIVO HDF5 EM ESPAÇOS DE MEMÓRIA SEPARADOS
 
-#importação por blocos de 100 colunas
-#begin <- 1
-#end <- ncol(block[[1L]])
-#for (i in seq_along(block)) {
-#  aux <- read.celfile(files.name[begin:end], intensity.means.only = T)[["INTENSITY"]][["MEAN"]]
-#  h5write(aux, "myhdf5file.h5", "analysis/index1", index = list(NULL, begin:end))
-#  begin <- begin + ncol(block[[i]])
-#  ifelse(test = i == length(block)-1, yes = end <- end + ncol(block[[length(block)]]), no = end <- end + ncol(block[[i]]))
-#}
+#importação por blocos de 100 colunas sem background corrigido
 
 begin <- 1
 end <- ncol(block[[1L]])
@@ -80,30 +69,10 @@ for (i in seq_along(block)) {
   ifelse(test = i == length(block)-1, yes = end <- end + ncol(block[[length(block)]]), no = end <- end + ncol(block[[i]]))
 }
 
-#importação por amostra sem background corrigido
-for (i in seq_along(files.name)) {
-  aux <- read.celfile(files.name[i], intensity.means.only = T)[["INTENSITY"]][["MEAN"]]
-  h5write(aux, "myhdf5file.h5", "analysis/index1", index = list(NULL,i))
-}
-
-
-## armazena os dados em HDF5 já com o background corrigido pelo método rma
-#for (i in seq_along(files.name)) {
-#  aux <- read.celfile(files.name[i], intensity.means.only = TRUE)[["INTENSITY"]][["MEAN"]] ## armazena uma amostra
-#  newaux <- aux[pminfo$fid] ## seleciona apenas PM
-#  newaux <- backgroundCorrect.matrix(newaux, normexp.method = "rma", verbose = TRUE) ## realiza correção de ruído de fundo
-#  dim(newaux) <- c(NULL) 
-#  aux <- insert(aux, pminfo$fid, newaux) ## devolve PM com ruído de fundo corrigido
-#  aux <- aux[-((pminfo$fid)+c(1:length(pminfo$fid)))] ## extrai PM crus
-#  h5write(aux, "myhdf5file.h5", "analysis/dataset", index = list(NULL,i))
-#}
-
-
+## fecha e abre novamente o arquivo .h5 
 h5closeAll()
 h5f <- H5Fopen("myhdf5file.h5")
 h5g <- H5Gopen(h5f, "analysis")
-#h5d <- H5Dopen(h5g, "dataset")
-#h5id <- H5Dopen(h5g, "index1")
 
 ## localiza os dados de expressão na memória
 data <- realize(h5g$test)
@@ -199,24 +168,6 @@ for (i in seq_along(block.pm)) {
 }
 
 
-
-#pm <- apply(pm, 2, sort) ## ordena-os PM do menor para o maior
-#mu <- apply(pm, 1, mean) ## calcula a média das linhas dos PM
-
-## atribui a cada linha o valor de sua respectiva média
-#for (i in 1:length(mu)) {
-#  pm[i, ] <- rep(mu[i], length(files.name))
-#}
-
-## localiza os dados dos índices e reordena os dados de expressão
-#id <- realize(h5g$index0)
-#for(i in 1:length(files.name)){
-#    aux <- id[ ,i]
-#    newaux <- pm[,i]
-#    newaux <- newaux[order(aux)]
-#    pm[ ,i] <- newaux
-#}
-
 ## armazena os dados com PM com background corrigido e normalizado no banco de dados original
 begin <- 1
 end <- ncol(block.pm[[1L]])
@@ -231,14 +182,6 @@ for (i in seq_along(block.pm)) {
   ifelse(test = i == length(block.pm)-1, yes = end <- end + ncol(block.pm[[length(block.pm)]]), no = end <- end + ncol(block.pm[[i]]))
 }
 
-
-#for (i in 1:length(files.name)) {
-#  aux <- data[,i]
-# newaux <- pm[,i]
-#  aux <- insert(aux, pminfo$fid, newaux) ## devolve PM com background corrigido e normalizado
-#  aux <- aux[-((pminfo$fid)+c(1:length(pminfo$fid)))] ## extrai PM apenas com background corrigido
-#  h5write(aux, "myhdf5file.h5", "analysis/test", index = list(NULL,i))  
-#}
 
 ## Reserva um espaço de memória para salvar os PM com background corrigido, normalizados e sumarizados
 h5createDataset(file = "myhdf5file.h5", dataset = "analysis/summarize(PM)", dims = c(length(unique(pminfo$fsetid)), length(files.name)), maxdims = c(length(unique(pminfo$fsetid)), length(files.name)), storage.mode = "double", chunk = c(length(unique(pminfo$fsetid)), length(files.name)), level = 5, showWarnings = FALSE)
@@ -355,8 +298,6 @@ for (h in seq_along(block.pm.row)) {
 
 
 
-
-
 ## armazena as matrizes com os PM de cada gene para todas as amostras
 for (j in 1:length(genes.id)) {
   newaux <- filter(pminfo, pminfo$fsetid == genes.id[j])
@@ -371,18 +312,6 @@ for (j in 1:length(genes.id)) {
   }
 
 
-## cria "grades" para processamento em blocos  
-#original.grid <- blockGrid(data, block.length = 5000000, block.shape = "first-dim-grows-first")
-#medpolish.grid <- blockGrid(data, block.length = 5000000, block.shape = "first-dim-grows-first")
-
-## aplica o polimento de mediana em blocos 
-#for(i in seq_along(original.grid)){
-#  original.block <- read_block(data, original.grid[[i]])
-#  medpolish.block <- medpolish(original.block)$residuals
-#  return.block <- original.block - medpolish.block
-#  data <- write_block(data, original.grid[[i]], return.block)
-#}
-
 ## salva os dados processados 
 for (i in 1:length(files.name)) {
   h5write(data[, i], "myhdf5file.h5", "analysis/dataset", index = list(NULL,i))
@@ -391,18 +320,5 @@ for (i in 1:length(files.name)) {
 h5closeAll()
 
 
-
-#run <- by(pminfo$fid, pminfo$fsetid, function(pm.index){
-#  for (i in 1:length(files.name)) {
-#    genes.pm <- cbind(genes.pm, data[,i]pm.index    
-#  }
-#})
-
 gene.pm.id <- as(as(by(pminfo$fid, pminfo$fsetid, rbind, simplify = T), "DataFrame"), "HDF5Array")
 
-
-#  k <- k + 1    
-# apply(data, 2, function(amostra){
-#        genes.pm[k] <- cbind(genes.pm[k], amostra[pm.index])
-#      })
-#    })
