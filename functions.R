@@ -278,6 +278,9 @@ normalize.h5 <- function(){
   begin <- 1
   end <- ncol(block.col[[1L]])
   index <- ascend.indexPM()
+  h5closeAll()
+  h5f <- H5Fopen("myhdf5file.h5")
+  h5g <- H5Gopen(h5f, "analysis")
   for (i in seq_along(block.col)) {
     aux <- h5read(h5g, "normalize(PM)", index = list(NULL, begin:end))
     aux1 <- index[,begin:end]
@@ -424,13 +427,15 @@ summarize.by.block <- function(gene.specific.matrix.result){
   raw.with.pm.result <- raw.with.pm.h5()
   
   ## cria um objeto no qual serão salvos os dados de expressão
-  exprs.values <- as(matrix(nrow = length(genes.id), ncol = ncol(raw.with.pm.result)), "HDF5Array")  
+  exprs.values <- c()
+    #as(matrix(nrow = length(genes.id), ncol = ncol(raw.with.pm.result)), "HDF5Array")  
 
   ## aplica a sumarização e salva os valores de expressão no objeto exprs.value
   for (i in seq_along(genes.id)) {
     genes.pm <- gene.specific.matrix(raw.with.pm.result, genes.id[i])
     genes.pm <- log(colMeans(sweep(genes.pm, 2, medpolish(genes.pm)$col)),2)
-    exprs.values[i,] <- genes.pm
+    exprs.values <- rbind(exprs.values, genes.pm)
+    #exprs.values[i,] <- genes.pm
   }
   
   ## Salva os valores de expressão em HDF5
